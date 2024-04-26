@@ -1,0 +1,12 @@
+name = "ollama-models"
+main = "src/index.ts"
+compatibility_date = "2024-04-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "KV"
+id = "xxx"
+preview_id = "xxx"
+
+[triggers]
+crons = ["0 * * * *"]
