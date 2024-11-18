@@ -9,4 +9,4 @@ id = "xxx"
 preview_id = "xxx"
 
 [triggers]
-crons = ["0 * * * *"]
+crons = ["0 0 * * *"]
