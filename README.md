@@ -3,7 +3,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Update](https://img.shields.io/badge/update-daily-brightgreen.svg)
 
-A Cloudflare Worker that provides a comprehensive JSON API of all available Ollama models with their tags. Updates automatically every 24 hours.
+A Cloudflare Worker that provides a comprehensive JSON API of all available Ollama models with their tags. Updates automatically once daily at midnight (cron: `0 0 * * *`).
 
 ## 🚀 Live API
 
@@ -14,7 +14,7 @@ A Cloudflare Worker that provides a comprehensive JSON API of all available Olla
 - Complete list of all Ollama models
 - Includes model descriptions
 - Provides all available tags for each model
-- Updated automatically every 24 hours
+- Updated automatically once daily at midnight
 - Cached responses for improved performance
 - Lightweight JSON format
 
