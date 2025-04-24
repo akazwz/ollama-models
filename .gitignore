@@ -173,3 +173,6 @@ dist
 
 .dev.vars
 .wrangler/
+
+# IDE
+.idea/
