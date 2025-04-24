@@ -1,6 +1,7 @@
 # Logs
 
 wrangler.toml
+wrangler.jsonc
 
 logs
 _.log

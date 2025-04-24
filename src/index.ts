@@ -12,6 +12,10 @@ export default {
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<Response> {
+		const { pathname } = new URL(request.url);
+		if (pathname !== "/") {
+			return new Response("Not Found", { status: 404 });
+		}
 		let models = await env.KV.get("models", { type: "json", cacheTtl: 3600 });
 		if (!models) {
 			models = await fetchModels();
