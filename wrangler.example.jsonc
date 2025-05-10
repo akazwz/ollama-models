@@ -1,19 +1,19 @@
- {
+{
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "ollama-models",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-03-27",
+	"compatibility_date": "2025-05-10",
 	"observability": {
 		"enabled": true
 	},
-    "kv_namespaces": [
-        {
-            "binding": "KV",
-            "id": "xxx",
-            "preview_id": "xxx"
-        }
-    ],
-    "triggers": {
-        "crons": ["0 0 * * *"]
-    }
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			"id": "xxx",
+			"preview_id": "xxx"
+		}
+	],
+	"triggers": {
+		"crons": ["0 0 * * *"]
+	}
 }

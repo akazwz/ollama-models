@@ -13,15 +13,20 @@ export default {
 		ctx: ExecutionContext,
 	): Promise<Response> {
 		const { pathname } = new URL(request.url);
-		if (pathname !== "/") {
-			return new Response("Not Found", { status: 404 });
+		if (pathname === "/sync") {
+			const models = await fetchModels();
+			await env.KV.put("models", JSON.stringify(models));
+			return new Response("Synced", { status: 200 });
 		}
-		let models = await env.KV.get("models", { type: "json", cacheTtl: 3600 });
-		if (!models) {
-			models = await fetchModels();
-			ctx.waitUntil(env.KV.put("models", JSON.stringify(models)));
+		if (pathname === "/") {
+			let models = await env.KV.get("models", { type: "json", cacheTtl: 60 });
+			if (!models) {
+				models = await fetchModels();
+				ctx.waitUntil(env.KV.put("models", JSON.stringify(models)));
+			}
+			return Response.json(models);
 		}
-		return Response.json(models);
+		return new Response("Not Found", { status: 404 });
 	},
 	async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
 		const models = await fetchModels();
@@ -45,19 +50,25 @@ async function fetchModels(): Promise<ModelDetail[]> {
 		if (tagsHref) {
 			const resp = await fetch(baseUrl.concat(tagsHref));
 			const $ = load(await resp.text());
-			let list = $("body > main > div > section > div > div").find("a");
-			list.each((i, el) => {
-				if (i === 0) return;
-				const tag = $(el).text().trim();
-				if (tag) {
-					tags.push(tag);
+			$("ul li").each((_, element) => {
+				const link = $(element).find("a");
+				const href = link.attr("href");
+				if (href?.includes(`/library/${name}`)) {
+					const tag = href.split(`/library/${name}`)[1] || ":latest";
+					const cleanTag = tag.startsWith(":") ? tag.slice(1) : tag;
+					const fullTag = cleanTag ? `${name}:${cleanTag}` : `${name}:latest`;
+					const pureTag = fullTag.split(":")[1];
+					if (pureTag !== "latest") {
+						tags.push(pureTag);
+					}
 				}
 			});
 		}
+		const uniqueTags = Array.from(new Set(tags));
 		models.push({
 			name,
 			description,
-			tags,
+			tags: uniqueTags,
 		});
 	}
 	return models;
