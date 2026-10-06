@@ -1,4 +1,6 @@
-onlyBuiltDependencies:
-  - '@biomejs/biome'
-  - esbuild
-  - workerd
+allowBuilds:
+  esbuild: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - miniflare@5.20260926.1-alpha
+  - wrangler@4.143.1
