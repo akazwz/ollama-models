@@ -2,23 +2,33 @@
 	"name": "ollama-models",
 	"version": "0.0.0",
 	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@12.8.1",
+	"engines": {
+		"node": ">=22.18.0"
+	},
 	"scripts": {
-		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
-		"start": "wrangler dev",
-		"test": "vitest",
-		"cf-typegen": "wrangler types",
-		"format": "biome format --write ."
+		"deploy": "cf deploy",
+		"dev": "cf dev",
+		"start": "cf dev",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "cf workers types && tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"check": "pnpm lint && pnpm typecheck && pnpm test",
+		"check:source": "node scripts/check-source.ts",
+		"build": "cf deploy --dry-run"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^1.9.4",
-		"@types/node": "^22.15.17",
-		"typescript": "^5.8.3",
-		"wrangler": "^4.14.4"
+		"@biomejs/biome": "^2.5.14",
+		"@types/node": "^22.20.4",
+		"cf": "1.0.0-beta.12",
+		"typescript": "~5.9.3",
+		"vitest": "^5.0.2",
+		"wrangler": "^4.143.1"
 	},
 	"dependencies": {
-		"@discordjs/rest": "^2.5.0",
-		"cheerio": "1.0.0",
-		"discord-api-types": "^0.38.4"
+		"cheerio": "^1.2.0"
 	}
 }

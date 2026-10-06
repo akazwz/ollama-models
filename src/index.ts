@@ -1,114 +1,117 @@
-import { load } from "cheerio";
-import { REST } from "@discordjs/rest";
-import { Routes } from "discord-api-types/rest/v10";
+import { fetchCatalog } from "./catalog";
 
-interface ModelDetail {
-	name: string;
-	description: string;
-	tags: string[];
+// Bindings come from cloudflare.config.ts; the manual-sync secret is optional.
+export interface WorkerEnv extends Env {
+	SYNC_TOKEN?: string;
+}
+
+interface CatalogMetadata {
+	updatedAt: string;
+}
+
+const STALE_AFTER_MS = 26 * 60 * 60 * 1000;
+
+export async function syncCatalog(env: WorkerEnv) {
+	const startedAt = Date.now();
+	try {
+		const models = await fetchCatalog();
+		const updatedAt = new Date().toISOString();
+		// The value is the public response body; one write publishes it with its timestamp.
+		await env.KV.put("models", JSON.stringify(models), {
+			metadata: { updatedAt } satisfies CatalogMetadata,
+		});
+		console.info({
+			event: "catalog_sync_succeeded",
+			updatedAt,
+			models: models.length,
+			tags: models.reduce((total, model) => total + model.tags.length, 0),
+			durationMs: Date.now() - startedAt,
+		});
+		return { models: models.length, updatedAt };
+	} catch (error) {
+		console.error({
+			event: "catalog_sync_failed",
+			error: error instanceof Error ? error.message : String(error),
+			durationMs: Date.now() - startedAt,
+		});
+		throw error;
+	}
+}
+
+async function manualSync(request: Request, env: WorkerEnv): Promise<Response> {
+	if (request.method !== "POST")
+		return new Response("Method Not Allowed", {
+			status: 405,
+			headers: { Allow: "POST" },
+		});
+	if (!env.SYNC_TOKEN)
+		return Response.json(
+			{ error: "Manual synchronization is not configured." },
+			{ status: 503 },
+		);
+	if (request.headers.get("Authorization") !== `Bearer ${env.SYNC_TOKEN}`)
+		return Response.json({ error: "Unauthorized" }, { status: 401 });
+	try {
+		return Response.json(await syncCatalog(env));
+	} catch {
+		return Response.json(
+			{ error: "Synchronization failed. Check Workers Logs for details." },
+			{ status: 502 },
+		);
+	}
+}
+
+async function readCatalog(
+	request: Request,
+	env: WorkerEnv,
+): Promise<Response> {
+	if (request.method !== "GET")
+		return new Response("Method Not Allowed", {
+			status: 405,
+			headers: { Allow: "GET" },
+		});
+	try {
+		const { value, metadata } = await env.KV.getWithMetadata<CatalogMetadata>(
+			"models",
+			{ type: "stream", cacheTtl: 60 },
+		);
+		if (!value)
+			return Response.json(
+				{ error: "Catalog unavailable. Run a synchronization first." },
+				{ status: 503 },
+			);
+		// Catalogs stored before timestamps were recorded have no metadata.
+		const updatedAt = metadata?.updatedAt;
+		const headers = new Headers({
+			"Content-Type": "application/json",
+			"Cache-Control": "public, max-age=60",
+			"X-Catalog-Stale": updatedAt
+				? String(Date.now() - Date.parse(updatedAt) > STALE_AFTER_MS)
+				: "unknown",
+		});
+		if (updatedAt) headers.set("X-Catalog-Updated-At", updatedAt);
+		return new Response(value, { headers });
+	} catch (error) {
+		console.error({
+			event: "catalog_read_failed",
+			error: error instanceof Error ? error.message : String(error),
+		});
+		return Response.json(
+			{ error: "Catalog temporarily unavailable." },
+			{ status: 503 },
+		);
+	}
 }
 
 export default {
-	async fetch(
-		request: Request,
-		env: Env,
-		ctx: ExecutionContext,
-	): Promise<Response> {
+	async fetch(request: Request, env: WorkerEnv): Promise<Response> {
 		const { pathname } = new URL(request.url);
-		if (pathname === "/sync") {
-			const models = await fetchModels();
-			const msg = `Synced ${models.length} ollama models`;
-			const noTagModelNames = models
-				.filter((model) => model.tags.length === 0)
-				.map((model) => model.name);
-			if (noTagModelNames.length > 0) {
-				console.error(`No tag models: ${noTagModelNames.join(", ")}`);
-				await sendDiscordMessage(
-					env,
-					`No tag models: ${noTagModelNames.join(", ")}`,
-				);
-			} else {
-				await sendDiscordMessage(env, msg);
-			}
-			await env.KV.put("models", JSON.stringify(models));
-			return new Response(msg, { status: 200 });
-		}
-		if (pathname === "/") {
-			let models = await env.KV.get("models", { type: "json", cacheTtl: 60 });
-			if (!models) {
-				models = await fetchModels();
-				ctx.waitUntil(env.KV.put("models", JSON.stringify(models)));
-			}
-			return Response.json(models);
-		}
+		if (pathname === "/sync") return manualSync(request, env);
+		if (pathname === "/") return readCatalog(request, env);
 		return new Response("Not Found", { status: 404 });
 	},
-	async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-		const models = await fetchModels();
-		const msg = `Synced ${models.length} ollama models`;
-		const noTagModelNames = models
-			.filter((model) => model.tags.length === 0)
-			.map((model) => model.name);
-		if (noTagModelNames.length > 0) {
-			console.error(`No tag models: ${noTagModelNames.join(", ")}`);
-			await sendDiscordMessage(
-				env,
-				`No tag models: ${noTagModelNames.join(", ")}`,
-			);
-		} else {
-			await sendDiscordMessage(env, msg);
-		}
-		await env.KV.put("models", JSON.stringify(models));
+	async scheduled(_controller, env) {
+		// Let errors reach Cloudflare so the invocation is recorded as a failure.
+		await syncCatalog(env);
 	},
-};
-
-async function fetchModels(): Promise<ModelDetail[]> {
-	const baseUrl = "https://ollama.com";
-	const resp = await fetch(baseUrl.concat("/library"));
-	const $ = load(await resp.text());
-	const models: ModelDetail[] = [];
-	const elements = $("#repo > ul").find("li");
-	for (let i = 0; i < elements.length; i++) {
-		const element = elements.get(i);
-		const a = $(element).find("a");
-		const name = a.find("h2").text().trim();
-		const description = a.find("p").first().text().trim();
-		const tagsHref = a.attr("href")?.concat("/tags");
-		const tags: string[] = [];
-		if (tagsHref) {
-			const resp = await fetch(baseUrl.concat(tagsHref));
-			const $ = load(await resp.text());
-			$("ul li").each((_, element) => {
-				const link = $(element).find("a");
-				const href = link.attr("href");
-				if (href?.includes(`/library/${name}`)) {
-					const tag = href.split(`/library/${name}`)[1] || ":latest";
-					const cleanTag = tag.startsWith(":") ? tag.slice(1) : tag;
-					const fullTag = cleanTag ? `${name}:${cleanTag}` : `${name}:latest`;
-					const pureTag = fullTag.split(":")[1];
-					if (pureTag !== "latest") {
-						tags.push(pureTag);
-					}
-				}
-			});
-		}
-		const uniqueTags = Array.from(new Set(tags));
-		models.push({
-			name,
-			description,
-			tags: uniqueTags,
-		});
-	}
-	return models;
-}
-
-async function sendDiscordMessage(env: Env, message: string) {
-	const rest = new REST({
-		version: "10",
-	}).setToken(env.DISCORD_BOT_TOKEN);
-	await rest.post(Routes.channelMessages(env.DISCORD_CHANNEL_ID), {
-		body: {
-			content: message,
-		},
-	});
-}
+} satisfies ExportedHandler<WorkerEnv>;
