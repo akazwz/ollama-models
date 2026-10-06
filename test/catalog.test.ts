@@ -61,25 +61,64 @@ describe("Ollama page parsing", () => {
 	});
 });
 
-describe("catalog fetching", () => {
-	it.each(["library", "tags"])(
-		"rejects HTTP errors from the %s page after retrying",
-		async (stage) => {
-			vi.useFakeTimers();
-			vi.stubGlobal(
-				"fetch",
-				vi.fn(async (url: string) =>
-					stage === "library" || url.endsWith("/tags")
-						? new Response("Unavailable", { status: 503 })
-						: new Response(library),
-				),
-			);
-			const pending = expect(fetchCatalog()).rejects.toThrow("HTTP 503");
-			await vi.runAllTimersAsync();
-			await pending;
-			expect(fetch).toHaveBeenCalledTimes(stage === "library" ? 3 : 4);
-		},
+function stubLibrary(count: number, tagsPage: (name: string) => Response) {
+	const html = Array.from(
+		{ length: count },
+		(_, n) =>
+			`<a href="/library/model${n}"><p>Description</p><span>1 Tags</span></a>`,
+	).join("");
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (url: string) =>
+			url.endsWith("/library")
+				? new Response(html)
+				: tagsPage(url.split("/").at(-2) ?? ""),
+		),
 	);
+}
+
+describe("catalog fetching", () => {
+	it("rejects HTTP errors from the library page after retrying", async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response("Unavailable", { status: 503 })),
+		);
+		const pending = expect(fetchCatalog()).rejects.toThrow("HTTP 503");
+		await vi.runAllTimersAsync();
+		await pending;
+		expect(fetch).toHaveBeenCalledTimes(3);
+	});
+	it("keeps previous tags for a failing model, omits an unknown one and updates the rest", async () => {
+		vi.useFakeTimers();
+		stubLibrary(4, (name) =>
+			name === "model0" || name === "model1"
+				? new Response("Unavailable", { status: 503 })
+				: new Response(`<a href="/library/${name}:latest">latest</a>`),
+		);
+		const pending = fetchCatalog([
+			{ name: "model0", description: "old", tags: ["previous"] },
+		]);
+		await vi.runAllTimersAsync();
+		expect(await pending).toEqual([
+			{ name: "model0", description: "Description", tags: ["previous"] },
+			{ name: "model2", description: "Description", tags: ["latest"] },
+			{ name: "model3", description: "Description", tags: ["latest"] },
+		]);
+		expect(console.warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				event: "catalog_model_failed",
+				model: "model1",
+				keptPreviousTags: false,
+			}),
+		);
+	});
+	it("abandons the update when many models fail or none succeeds", async () => {
+		stubLibrary(9, () => new Response("<html>Changed</html>"));
+		await expect(fetchCatalog()).rejects.toThrow("More than 5 models failed");
+		stubLibrary(2, () => new Response("<html>Changed</html>"));
+		await expect(fetchCatalog()).rejects.toThrow("No model's tags");
+	});
 	it("retries a transient failure instead of failing the synchronization", async () => {
 		vi.useFakeTimers();
 		let failures = 2;

@@ -20,6 +20,7 @@ function environment(
 		metadata,
 	};
 	const kv = {
+		get: vi.fn(async () => stored.value && JSON.parse(stored.value)),
 		getWithMetadata: vi.fn(async () => stored),
 		put: vi.fn(
 			async (_key: string, value: string, options: { metadata: Metadata }) => {
@@ -86,6 +87,27 @@ describe("synchronization and publication", () => {
 		expect(await response.json()).toEqual(models);
 		expect(response.headers.get("X-Catalog-Updated-At")).toBe(updatedAt);
 		expect(response.headers.get("X-Catalog-Stale")).toBe("false");
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+	});
+	it("keeps a model's previous tags when only its page fails", async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async (url: string) =>
+					new Response(url.endsWith("/library") ? library : "<html></html>"),
+			),
+		);
+		const { env, kv } = environment(
+			[{ name: "qwen3", description: "old", tags: ["previous"] }],
+			null,
+		);
+		const pending = syncCatalog(env);
+		await vi.runAllTimersAsync();
+		await pending;
+		expect(JSON.parse(kv.put.mock.calls[0][1])).toEqual([
+			{ name: "qwen3", description: "Qwen description", tags: ["previous"] },
+		]);
 	});
 	it.each(["HTTP error", "empty library", "empty tags", "incomplete tags"])(
 		"preserves the previous snapshot on %s",
