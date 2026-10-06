@@ -1,4 +1,4 @@
-import { fetchCatalog } from "./catalog";
+import { fetchCatalog, type ModelDetail } from "./catalog";
 
 // Bindings come from cloudflare.config.ts; the manual-sync secret is optional.
 export interface WorkerEnv extends Env {
@@ -10,11 +10,13 @@ interface CatalogMetadata {
 }
 
 const STALE_AFTER_MS = 26 * 60 * 60 * 1000;
+const CORS = { "Access-Control-Allow-Origin": "*" };
 
 export async function syncCatalog(env: WorkerEnv) {
 	const startedAt = Date.now();
 	try {
-		const models = await fetchCatalog();
+		const previous = await env.KV.get<ModelDetail[]>("models", "json");
+		const models = await fetchCatalog(Array.isArray(previous) ? previous : []);
 		const updatedAt = new Date().toISOString();
 		// The value is the public response body; one write publishes it with its timestamp.
 		await env.KV.put("models", JSON.stringify(models), {
@@ -78,11 +80,13 @@ async function readCatalog(
 		if (!value)
 			return Response.json(
 				{ error: "Catalog unavailable. Run a synchronization first." },
-				{ status: 503 },
+				{ status: 503, headers: CORS },
 			);
 		// Catalogs stored before timestamps were recorded have no metadata.
 		const updatedAt = metadata?.updatedAt;
 		const headers = new Headers({
+			...CORS,
+			"Access-Control-Expose-Headers": "X-Catalog-Updated-At, X-Catalog-Stale",
 			"Content-Type": "application/json",
 			"Cache-Control": "public, max-age=60",
 			"X-Catalog-Stale": updatedAt
@@ -98,7 +102,7 @@ async function readCatalog(
 		});
 		return Response.json(
 			{ error: "Catalog temporarily unavailable." },
-			{ status: 503 },
+			{ status: 503, headers: CORS },
 		);
 	}
 }

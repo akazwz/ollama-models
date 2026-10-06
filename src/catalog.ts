@@ -17,6 +17,7 @@ const CONCURRENCY = 4;
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1_000;
+const MAX_FAILED_MODELS = 5;
 
 function libraryPath(href: string | undefined): string | undefined {
 	if (!href) return;
@@ -122,18 +123,44 @@ async function fetchHtml(path: string): Promise<string> {
 	}
 }
 
-export async function fetchCatalog(): Promise<ModelDetail[]> {
+export async function fetchCatalog(
+	previous: ModelDetail[] = [],
+): Promise<ModelDetail[]> {
 	const library = parseLibrary(await fetchHtml("/library"));
+	const previousTags = new Map(
+		previous.map((model) => [model.name, model.tags]),
+	);
 	const models: ModelDetail[] = [];
+	let failures = 0;
 	for (let offset = 0; offset < library.length; offset += CONCURRENCY) {
 		const batch = await Promise.all(
-			library.slice(offset, offset + CONCURRENCY).map(async (model) => ({
-				name: model.name,
-				description: model.description,
-				tags: parseTags(await fetchHtml(`/library/${model.name}/tags`), model),
-			})),
+			library.slice(offset, offset + CONCURRENCY).map(async (model) => {
+				const { name, description } = model;
+				try {
+					const html = await fetchHtml(`/library/${name}/tags`);
+					return { name, description, tags: parseTags(html, model) };
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					// Many failures mean the site changed or is down, not one bad page.
+					if (++failures > MAX_FAILED_MODELS)
+						throw new Error(
+							`More than ${MAX_FAILED_MODELS} models failed. Last: ${message}`,
+						);
+					// One bad page keeps that model's previous tags instead of stalling the rest.
+					const tags = previousTags.get(name);
+					console.warn({
+						event: "catalog_model_failed",
+						model: name,
+						keptPreviousTags: Boolean(tags?.length),
+						error: message,
+					});
+					return tags?.length ? { name, description, tags } : undefined;
+				}
+			}),
 		);
-		models.push(...batch);
+		for (const model of batch) if (model) models.push(model);
 	}
+	if (models.length === 0) throw new Error("No model's tags could be fetched.");
 	return models;
 }
