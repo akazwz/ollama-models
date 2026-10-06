@@ -14,9 +14,12 @@ curl https://ollama-models.zwz.workers.dev
 ```json
 [
   {
-    "name": "gpt-oss",
-    "description": "OpenAI’s open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases.",
-    "tags": ["latest", "20b", "120b", "20b-cloud", "120b-cloud"]
+    "name": "qwen3.8",
+    "description": "Qwen3.8 delivers substantial gains across coding, professional work, research, and long-horizon agentic tasks.",
+    "tags": [
+      "latest", "27b", "27b-mlx", "27b-mlx-bf16", "27b-mtp-q4_K_M", "27b-mtp-q8_0",
+      "27b-mtp-bf16", "27b-mxfp8", "27b-nvfp4", "27b-q4_K_M", "27b-q8_0", "27b-bf16"
+    ]
   }
 ]
 ```
@@ -33,11 +36,11 @@ No key, no sign-up, one endpoint: `GET https://ollama-models.zwz.workers.dev/` r
 | `description` | `string` | Short description from the library page |
 | `tags` | `string[]` | Every tag of the model: `latest`, sizes, quantizations, instruct/thinking variants and cloud aliases |
 
-Join `name` and a tag with a colon to get something you can pull, for example `gpt-oss:20b`.
+Join `name` and a tag with a colon to get something you can pull, for example `qwen3.8:27b-q4_K_M`.
 
 ```js
 const models = await (await fetch("https://ollama-models.zwz.workers.dev")).json();
-const qwen3 = models.find((model) => model.name === "qwen3");
+const qwen = models.find((model) => model.name === "qwen3.8");
 ```
 
 ```python
